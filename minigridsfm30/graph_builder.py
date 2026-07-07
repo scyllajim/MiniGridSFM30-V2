@@ -489,9 +489,29 @@ def sample_to_net(sample: dict):
 def sample_to_heterodata(sample: dict) -> HeteroData:
     """
     Convert a saved sample dict into GridSFM-style HeteroData.
+
+    Feasible samples have OPF labels and participate in full supervised/physics losses.
+    Infeasible samples do not have valid OPF labels; they are converted with dummy labels
+    so that batching works, but later losses should mask them out except feasibility BCE.
     """
+    feasible = bool(sample.get("feasible", True))
+
     net = sample_to_net(sample)
-    data = net_to_heterodata(net, require_solution=True)
+    data = net_to_heterodata(net, require_solution=feasible)
+
     data.sample_id = int(sample.get("sample_id", -1))
-    data.feasible = torch.tensor([1.0 if sample.get("feasible", True) else 0.0], dtype=torch.float32)
+    data.feasible = torch.tensor([1.0 if feasible else 0.0], dtype=torch.float32)
+
+    if "perturb_mode" in sample:
+        data.perturb_mode = sample.get("perturb_mode")
+
+    if "merged_index" in sample:
+        data.merged_index = int(sample.get("merged_index", -1))
+
+    if not feasible:
+        data["bus"].y = torch.zeros((data["bus"].x.size(0), 2), dtype=torch.float32)
+        data["generator"].y = torch.zeros((data["generator"].x.size(0), 2), dtype=torch.float32)
+        data["branch_ac"].y = torch.zeros((data["branch_ac"].x.size(0), 4), dtype=torch.float32)
+        data.res_cost = torch.tensor([0.0], dtype=torch.float32)
+
     return data
