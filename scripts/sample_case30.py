@@ -161,19 +161,36 @@ def perturb_derate(net, derate_prob: float, derate_min: float, derate_max: float
     })
     return params
 
+def parse_candidates(s: str | None):
+    if s is None:
+        return None
+    s = str(s).strip()
+    if s == "":
+        return None
 
-def perturb_killgen(net, killgen_n: int, killgen_keep_min: int):
+    out = []
+    for x in s.split(","):
+        x = x.strip()
+        if x:
+            out.append(int(x))
+    return out
+
+def perturb_killgen(net, killgen_n: int, killgen_keep_min: int, killgen_candidates: str | None):
     """
     Pure killgen mode.
 
-    For case30, this is intentionally conservative:
-    only regular generators in net.gen are considered.
     ext_grid is kept online.
+    If killgen_candidates is given, only those regular generators can be killed.
+    Example:
+      --killgen-candidates 0,3
     """
+    candidates = parse_candidates(killgen_candidates)
+
     params = {
         "mode": "killgen",
         "killgen_n": killgen_n,
         "killgen_keep_min": killgen_keep_min,
+        "killgen_candidates": candidates,
         "n_gen": int(len(net.gen)),
     }
 
@@ -185,27 +202,35 @@ def perturb_killgen(net, killgen_n: int, killgen_keep_min: int):
     if "in_service" not in net.gen.columns:
         net.gen["in_service"] = True
 
-    active = [
+    active_all = [
         int(idx)
         for idx, row in net.gen.iterrows()
         if bool(row.get("in_service", True))
     ]
 
-    max_kill = max(0, len(active) - killgen_keep_min)
-    n_kill = min(int(killgen_n), max_kill)
+    active_candidates = active_all
+    if candidates is not None:
+        active_candidates = [g for g in active_all if g in candidates]
+
+    # keep_min is checked against all regular generators, not only candidates.
+    max_kill_by_keep = max(0, len(active_all) - killgen_keep_min)
+    max_kill_by_candidates = len(active_candidates)
+    n_kill = min(int(killgen_n), max_kill_by_keep, max_kill_by_candidates)
 
     if n_kill <= 0:
         params["applied"] = False
         params["n_killed"] = 0
-        params["active_before"] = active
+        params["active_all_before"] = active_all
+        params["active_candidates_before"] = active_candidates
         return params
 
-    killed = random.sample(active, n_kill)
+    killed = random.sample(active_candidates, n_kill)
     net.gen.loc[killed, "in_service"] = False
 
     params.update({
         "applied": True,
-        "active_before": active,
+        "active_all_before": active_all,
+        "active_candidates_before": active_candidates,
         "killed_gen_indices": killed,
         "n_killed": int(n_kill),
         "note": "ext_grid is kept online",
@@ -311,7 +336,7 @@ def apply_perturbation(net, args):
         return perturb_derate(net, args.derate_prob, args.derate_min, args.derate_max)
 
     if mode == "killgen":
-        return perturb_killgen(net, args.killgen_n, args.killgen_keep_min)
+        return perturb_killgen(net, args.killgen_n, args.killgen_keep_min, args.killgen_candidates)
 
     if mode == "vsqueeze":
         return perturb_vsqueeze(net, args.vsqueeze_prob, args.vsqueeze_eps, args.vm_margin)
@@ -440,6 +465,7 @@ def main():
 
     parser.add_argument("--killgen-n", type=int, default=1)
     parser.add_argument("--killgen-keep-min", type=int, default=1)
+    parser.add_argument("--killgen-candidates", type=str, default=None)
 
     parser.add_argument("--vsqueeze-prob", type=float, default=0.10)
     parser.add_argument("--vsqueeze-eps", type=float, default=0.005)
@@ -529,6 +555,7 @@ def main():
             "derate_max": args.derate_max,
             "killgen_n": args.killgen_n,
             "killgen_keep_min": args.killgen_keep_min,
+            "killgen_candidates": args.killgen_candidates,
             "vsqueeze_prob": args.vsqueeze_prob,
             "vsqueeze_eps": args.vsqueeze_eps,
             "vm_margin": args.vm_margin,
