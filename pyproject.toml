@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minigridsfm30"
+version = "0.2.0"
+description = "A compact GridSFM-style heterogeneous GNN surrogate for AC-OPF on pandapower case30."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "scyllajim" }
+]
+keywords = [
+  "ac-opf",
+  "power-systems",
+  "graph-neural-network",
+  "heterogeneous-graph",
+  "pandapower",
+  "pytorch-geometric"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering"
+]
+
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "networkx",
+  "tqdm",
+  "scikit-learn",
+  "pandapower",
+  "torch-geometric"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff"
+]
+
+[project.urls]
+Homepage = "https://github.com/scyllajim/MiniGridSFM30-V2"
+Repository = "https://github.com/scyllajim/MiniGridSFM30-V2"
+Issues = "https://github.com/scyllajim/MiniGridSFM30-V2/issues"
+
+[tool.setuptools.packages.find]
+include = ["minigridsfm30*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

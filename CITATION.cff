@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use MiniGridSFM30-V2, please cite this repository."
+title: "MiniGridSFM30-V2"
+type: software
+authors:
+  - family-names: "Jim"
+    given-names: "Jim"
+    alias: "scyllajim"
+repository-code: "https://github.com/scyllajim/MiniGridSFM30-V2"
+url: "https://github.com/scyllajim/MiniGridSFM30-V2"
+license: MIT
+version: 0.2.0
+date-released: 2026-07-13
+keywords:
+  - AC optimal power flow
+  - graph neural network
+  - heterogeneous graph
+  - power systems
+  - pandapower
+  - PyTorch Geometric
+  - GridSFM
+abstract: >
+  MiniGridSFM30-V2 is a compact GridSFM-style heterogeneous graph neural
+  network surrogate for AC optimal power flow on pandapower case30. It
+  includes scenario generation, heterogeneous graph construction,
+  physics-aware losses, outage-aware generator representations, baselines,
+  and random and holdout evaluation workflows.
