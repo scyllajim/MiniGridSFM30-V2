@@ -1,5 +1,7 @@
 # MiniGridSFM30-V2
 
+[![Tests](https://github.com/scyllajim/MiniGridSFM30-V2/actions/workflows/tests.yml/badge.svg)](https://github.com/scyllajim/MiniGridSFM30-V2/actions/workflows/tests.yml)
+
 A compact, reproducible **GridSFM-style heterogeneous GNN surrogate for AC Optimal Power Flow on `pandapower` case30**.
 
 MiniGridSFM30-V2 studies whether a heterogeneous graph neural network can approximate AC-OPF solutions under:
@@ -13,6 +15,14 @@ MiniGridSFM30-V2 studies whether a heterogeneous graph neural network can approx
 - random, mode-holdout, and few-shot evaluation settings.
 
 > This project is not an official Microsoft GridSFM checkpoint. It is a small-scale research prototype for understanding, testing, and extending GridSFM-style AC-OPF surrogate learning.
+
+---
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Experiments](docs/experiments.md)
+- [Dataset manifest](data/MANIFEST.md)
 
 ---
 
