@@ -39,7 +39,7 @@ def move_to_device(batch, device):
     return batch.to(device)
 
 
-def run_epoch(model, loader, optimizer, device, train: bool):
+def run_epoch(model, loader, optimizer, device, train: bool, loss_kwargs: dict):
     if train:
         model.train()
     else:
@@ -57,7 +57,7 @@ def run_epoch(model, loader, optimizer, device, train: bool):
 
         with torch.set_grad_enabled(train):
             out = model(batch)
-            loss, metrics = compute_loss(batch=batch, out=out, data=batch) if False else compute_loss(out, batch)
+            loss, metrics = compute_loss(out, batch, **loss_kwargs)
 
             if train:
                 loss.backward()
@@ -129,6 +129,23 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int, default=None)
 
+    # ----------------------------
+    # Loss weights for Stage 8 physics-loss ablation
+    # These names match compute_loss() in minigridsfm30/losses.py
+    # ----------------------------
+    parser.add_argument("--lambda-theta", type=float, default=1.0)
+    parser.add_argument("--lambda-v", type=float, default=1.0)
+    parser.add_argument("--lambda-pg", type=float, default=1.0)
+    parser.add_argument("--lambda-qg", type=float, default=1.0)
+    parser.add_argument("--lambda-branch-p", type=float, default=1.0)
+    parser.add_argument("--lambda-branch-q", type=float, default=1.0)
+    parser.add_argument("--lambda-balance-p", type=float, default=0.1)
+    parser.add_argument("--lambda-balance-q", type=float, default=0.1)
+    parser.add_argument("--lambda-kcl-p", type=float, default=1.0)
+    parser.add_argument("--lambda-kcl-q", type=float, default=1.0)
+    parser.add_argument("--lambda-cost", type=float, default=0.1)
+    parser.add_argument("--lambda-feas", type=float, default=0.1)
+
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -164,6 +181,21 @@ def main():
         dropout=args.dropout,
     ).to(device)
 
+    loss_kwargs = {
+        "lambda_theta": args.lambda_theta,
+        "lambda_v": args.lambda_v,
+        "lambda_pg": args.lambda_pg,
+        "lambda_qg": args.lambda_qg,
+        "lambda_branch_p": args.lambda_branch_p,
+        "lambda_branch_q": args.lambda_branch_q,
+        "lambda_balance_p": args.lambda_balance_p,
+        "lambda_balance_q": args.lambda_balance_q,
+        "lambda_kcl_p": args.lambda_kcl_p,
+        "lambda_kcl_q": args.lambda_kcl_q,
+        "lambda_cost": args.lambda_cost,
+        "lambda_feas": args.lambda_feas,
+    }
+
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=args.lr,
@@ -181,14 +213,30 @@ def main():
     print("num_layers:", args.num_layers)
     print("parameters:", count_parameters(model))
     print("run_dir:", run_dir)
+    print("loss weights:", loss_kwargs)
     print()
 
     best_val = float("inf")
     rows = []
 
     for epoch in range(1, args.epochs + 1):
-        train_m = run_epoch(model, train_loader, optimizer, device, train=True)
-        val_m = run_epoch(model, val_loader, optimizer, device, train=False)
+        train_m = run_epoch(
+            model,
+            train_loader,
+            optimizer,
+            device,
+            train=True,
+            loss_kwargs=loss_kwargs,
+        )
+
+        val_m = run_epoch(
+            model,
+            val_loader,
+            optimizer,
+            device,
+            train=False,
+            loss_kwargs=loss_kwargs,
+        )
 
         print_metrics("train", epoch, train_m)
         print_metrics("val  ", epoch, val_m)
@@ -210,6 +258,7 @@ def main():
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "args": vars(args),
+                "loss_kwargs": loss_kwargs,
                 "best_val": best_val,
             }
             torch.save(ckpt, run_dir / "best_model.pt")

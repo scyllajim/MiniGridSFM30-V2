@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Tuple
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,15 @@ def _safe_float(x, default=0.0):
         return float(x)
     except Exception:
         return float(default)
+
+
+def _safe_bool(x, default=True):
+    try:
+        if pd.isna(x):
+            return bool(default)
+        return bool(x)
+    except Exception:
+        return bool(default)
 
 
 def _get_poly_cost(net, element: str, element_index: int):
@@ -46,18 +55,38 @@ def _get_poly_cost(net, element: str, element_index: int):
     return cp2, cp1, cp0
 
 
+def _online_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return rows with in_service=True if the column exists.
+
+    This is important for killgen/outage-aware graph construction.
+    Offline generators should not define PV bus type.
+    """
+    if df is None or len(df) == 0:
+        return df
+    if "in_service" not in df.columns:
+        return df
+    return df[df["in_service"].astype(bool)]
+
+
 def _bus_type_code(net, bus_idx: int) -> float:
     """
     Rough MATPOWER-style bus type:
       1 = PQ
       2 = PV
       3 = slack/reference
-    """
-    if len(net.ext_grid) > 0 and bus_idx in set(net.ext_grid["bus"].astype(int).tolist()):
-        return 3.0
 
-    if len(net.gen) > 0 and bus_idx in set(net.gen["bus"].astype(int).tolist()):
-        return 2.0
+    Only online ext_grid/gen rows should define slack/PV status.
+    """
+    if hasattr(net, "ext_grid") and len(net.ext_grid) > 0:
+        eg = _online_table(net.ext_grid)
+        if len(eg) > 0 and bus_idx in set(eg["bus"].astype(int).tolist()):
+            return 3.0
+
+    if hasattr(net, "gen") and len(net.gen) > 0:
+        gen = _online_table(net.gen)
+        if len(gen) > 0 and bus_idx in set(gen["bus"].astype(int).tolist()):
+            return 2.0
 
     return 1.0
 
@@ -67,7 +96,7 @@ def _aggregate_load_by_bus(net, bus_to_pos: Dict[int, int], n_bus: int, sn_mva: 
     qd_pu = np.zeros(n_bus, dtype=np.float32)
 
     for _, row in net.load.iterrows():
-        if not bool(row.get("in_service", True)):
+        if not _safe_bool(row.get("in_service", True), True):
             continue
         b = int(row["bus"])
         if b not in bus_to_pos:
@@ -150,6 +179,25 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
       pandapower line -> branch_ac node
       bus --endpoint_of--> branch_ac
       branch_ac --endpoint_of--> bus
+
+    Generator feature layout, 12 dims:
+      0  is_online
+      1  reserved
+      2  pmin_pu
+      3  pmax_pu
+      4  reserved
+      5  qmin_pu
+      6  qmax_pu
+      7  vm_set_pu
+      8  cp2
+      9  cp1
+      10 cp0
+      11 is_ext_grid
+
+    Important:
+      Offline regular generators are kept as generator nodes, but is_online=0
+      and effective p/q bounds are set to 0. This makes killgen/outage
+      information explicit to the GNN without changing input dimension.
     """
     if require_solution:
         required = ["res_bus", "res_gen", "res_ext_grid", "res_line"]
@@ -216,15 +264,29 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
         bus_idx = int(row["bus"])
         bus_pos = bus_to_pos[bus_idx]
 
-        pmin = _safe_float(row.get("min_p_mw", -1e3)) / sn_mva
-        pmax = _safe_float(row.get("max_p_mw", 1e3)) / sn_mva
-        qmin = _safe_float(row.get("min_q_mvar", -1e3)) / sn_mva
-        qmax = _safe_float(row.get("max_q_mvar", 1e3)) / sn_mva
+        is_online = 1.0 if _safe_bool(row.get("in_service", True), True) else 0.0
+
+        pmin_raw = _safe_float(row.get("min_p_mw", -1e3)) / sn_mva
+        pmax_raw = _safe_float(row.get("max_p_mw", 1e3)) / sn_mva
+        qmin_raw = _safe_float(row.get("min_q_mvar", -1e3)) / sn_mva
+        qmax_raw = _safe_float(row.get("max_q_mvar", 1e3)) / sn_mva
+
+        if is_online <= 0.0:
+            pmin = 0.0
+            pmax = 0.0
+            qmin = 0.0
+            qmax = 0.0
+        else:
+            pmin = pmin_raw
+            pmax = pmax_raw
+            qmin = qmin_raw
+            qmax = qmax_raw
+
         vg = _safe_float(row.get("vm_pu", 1.0), 1.0)
         cp2, cp1, cp0 = _get_poly_cost(net, "gen", int(gen_idx))
 
         gen_x.append([
-            1.0,
+            is_online,
             0.0,
             pmin,
             pmax,
@@ -240,24 +302,47 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
         gen_bus_pos.append(bus_pos)
 
         if require_solution:
-            rg = net.res_gen.loc[gen_idx]
-            pg = _safe_float(rg.get("p_mw", 0.0)) / sn_mva
-            qg = _safe_float(rg.get("q_mvar", 0.0)) / sn_mva
+            if gen_idx in net.res_gen.index:
+                rg = net.res_gen.loc[gen_idx]
+                pg = _safe_float(rg.get("p_mw", 0.0)) / sn_mva
+                qg = _safe_float(rg.get("q_mvar", 0.0)) / sn_mva
+            else:
+                pg = 0.0
+                qg = 0.0
+
+            if is_online <= 0.0:
+                pg = 0.0
+                qg = 0.0
+
             gen_y.append([pg, qg])
 
     for eg_idx, row in net.ext_grid.iterrows():
         bus_idx = int(row["bus"])
         bus_pos = bus_to_pos[bus_idx]
 
-        pmin = _safe_float(row.get("min_p_mw", -1e3)) / sn_mva
-        pmax = _safe_float(row.get("max_p_mw", 1e3)) / sn_mva
-        qmin = _safe_float(row.get("min_q_mvar", -1e3)) / sn_mva
-        qmax = _safe_float(row.get("max_q_mvar", 1e3)) / sn_mva
+        is_online = 1.0 if _safe_bool(row.get("in_service", True), True) else 0.0
+
+        pmin_raw = _safe_float(row.get("min_p_mw", -1e3)) / sn_mva
+        pmax_raw = _safe_float(row.get("max_p_mw", 1e3)) / sn_mva
+        qmin_raw = _safe_float(row.get("min_q_mvar", -1e3)) / sn_mva
+        qmax_raw = _safe_float(row.get("max_q_mvar", 1e3)) / sn_mva
+
+        if is_online <= 0.0:
+            pmin = 0.0
+            pmax = 0.0
+            qmin = 0.0
+            qmax = 0.0
+        else:
+            pmin = pmin_raw
+            pmax = pmax_raw
+            qmin = qmin_raw
+            qmax = qmax_raw
+
         vg = _safe_float(row.get("vm_pu", 1.0), 1.0)
         cp2, cp1, cp0 = _get_poly_cost(net, "ext_grid", int(eg_idx))
 
         gen_x.append([
-            1.0,
+            is_online,
             0.0,
             pmin,
             pmax,
@@ -273,9 +358,18 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
         gen_bus_pos.append(bus_pos)
 
         if require_solution:
-            reg = net.res_ext_grid.loc[eg_idx]
-            pg = _safe_float(reg.get("p_mw", 0.0)) / sn_mva
-            qg = _safe_float(reg.get("q_mvar", 0.0)) / sn_mva
+            if eg_idx in net.res_ext_grid.index:
+                reg = net.res_ext_grid.loc[eg_idx]
+                pg = _safe_float(reg.get("p_mw", 0.0)) / sn_mva
+                qg = _safe_float(reg.get("q_mvar", 0.0)) / sn_mva
+            else:
+                pg = 0.0
+                qg = 0.0
+
+            if is_online <= 0.0:
+                pg = 0.0
+                qg = 0.0
+
             gen_y.append([pg, qg])
 
     data["generator"].x = torch.tensor(gen_x, dtype=torch.float32)
@@ -294,7 +388,7 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
     load_bus_pos = []
 
     for _, row in net.load.iterrows():
-        if not bool(row.get("in_service", True)):
+        if not _safe_bool(row.get("in_service", True), True):
             continue
 
         bus_idx = int(row["bus"])
@@ -340,7 +434,7 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
     branch_to_bus_attr = []
 
     for br_pos, (line_idx, row) in enumerate(net.line.iterrows()):
-        if not bool(row.get("in_service", True)):
+        if not _safe_bool(row.get("in_service", True), True):
             continue
 
         fb = int(row["from_bus"])
@@ -504,6 +598,7 @@ def sample_to_heterodata(sample: dict) -> HeteroData:
 
     if "perturb_mode" in sample:
         data.perturb_mode = sample.get("perturb_mode")
+
 
     if "merged_index" in sample:
         data.merged_index = int(sample.get("merged_index", -1))
