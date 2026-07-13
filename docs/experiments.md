@@ -144,3 +144,148 @@ The default loss remains the primary baseline.
 5. line-outage topology changes;
 6. case118 and case300;
 7. multi-topology training and validation.
+
+<!-- STAGE13_START -->
+## 10. Stage13 five-seed full-100 holdout experiment
+
+To measure training variability, the combination-holdout experiment was repeated with five random seeds:
+
+~~~text
+42, 43, 44, 45, 46
+~~~
+
+All runs used:
+
+- the same explicit training and validation datasets;
+- 100 complete epochs;
+- no early stopping;
+- `hidden_dim = 128`;
+- `num_layers = 3`;
+- `batch_size = 16`;
+- `lr = 1e-3`;
+- identical loss weights;
+- explicit CUDA device assignment;
+- NaN/Inf checks and gradient clipping.
+
+Training data:
+
+~~~text
+pure modes
++
+killgen + derate
+~~~
+
+Validation data:
+
+~~~text
+killgen + loads
+~~~
+
+### 10.1 Aggregate GNN results
+
+| Metric | Mean ± Std | Min | Max |
+|---|---:|---:|---:|
+| Theta MAE | 0.0223 ± 0.0002 | 0.0220 | 0.0225 |
+| V MAE | 0.0063 ± 0.0010 p.u. | 0.0052 | 0.0076 |
+| Validation loss | 0.0064 ± 0.0002 | 0.0062 | 0.0066 |
+| Pg MAE | 4.4268 ± 0.1327 MW | 4.2095 | 4.5639 |
+| Qg MAE | 2.3153 ± 0.0269 MVAr | 2.2834 | 2.3449 |
+| Branch P MAE | 1.8489 ± 0.1413 MW | 1.7393 | 2.0896 |
+| Branch Q MAE | 0.7661 ± 0.0539 MVAr | 0.7202 | 0.8586 |
+| KCL P MAE | 0.6074 ± 0.1129 MW | 0.5019 | 0.7632 |
+| KCL Q MAE | 0.3303 ± 0.0600 MVAr | 0.2691 | 0.4250 |
+| Balance P MAE | 2.8444 ± 0.9664 MW | 2.1804 | 4.4731 |
+| Balance Q MAE | 2.0175 ± 1.0098 MVAr | 1.2729 | 3.6722 |
+| Cost MAPE | 4.9088 ± 0.3500% | 4.5807 | 5.4193 |
+
+### 10.2 Per-seed results
+
+| Seed | Best epoch | Pg MW | Qg MVAr | Branch P MW | Branch Q MVAr | KCL P MW | Balance P MW | Cost % |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 42 | 89 | 4.4214 | 2.3037 | 1.7393 | 0.7202 | 0.5408 | 2.9919 | 4.5807 |
+| 43 | 49 | 4.2095 | 2.3449 | 2.0896 | 0.8586 | 0.7632 | 2.3164 | 4.8885 |
+| 44 | 97 | 4.4505 | 2.3027 | 1.7679 | 0.7623 | 0.5019 | 2.2602 | 4.5951 |
+| 45 | 88 | 4.5639 | 2.2834 | 1.7913 | 0.7472 | 0.5411 | 4.4731 | 5.0604 |
+| 46 | 94 | 4.4886 | 2.3419 | 1.8566 | 0.7424 | 0.6899 | 2.1804 | 5.4193 |
+
+### 10.3 Comparison with baselines
+
+| Model | Pg MW | Qg MVAr | Branch P MW | Branch Q MVAr | Cost MAPE |
+|---|---:|---:|---:|---:|---:|
+| Mean baseline | 11.2375 | 5.8059 | 3.2076 | 1.2545 | 6.2034% |
+| Nearest neighbor | 2.9949 | 1.5685 | 1.0476 | 0.5427 | 3.5289% |
+| GNN, five-seed mean | 4.4268 ± 0.1327 | 2.3153 ± 0.0269 | 1.8489 ± 0.1413 | 0.7661 ± 0.0539 | 4.9088 ± 0.3500% |
+
+### 10.4 Relative improvement over the mean baseline
+
+Using the five-seed GNN mean:
+
+| Metric | Mean baseline | GNN mean | Relative reduction |
+|---|---:|---:|---:|
+| Pg MAE | 11.2375 MW | 4.4268 MW | 60.61% |
+| Qg MAE | 5.8059 MVAr | 2.3153 MVAr | 60.12% |
+| Branch P MAE | 3.2076 MW | 1.8489 MW | 42.36% |
+| Branch Q MAE | 1.2545 MVAr | 0.7661 MVAr | 38.93% |
+| Cost MAPE | 6.2034% | 4.9088% | 20.87% |
+
+### 10.5 Interpretation
+
+The five-seed experiment supports the following conclusions:
+
+1. The GNN consistently and substantially outperforms the mean baseline.
+2. The nearest-neighbor baseline remains stronger on this fixed-topology holdout.
+3. Generator dispatch errors are relatively stable across random seeds.
+4. Branch-flow errors show moderate seed sensitivity.
+5. Global active- and reactive-power balance errors are the least stable metrics.
+6. The result demonstrates partial compositional generalization, but not superiority over retrieval-based baselines.
+
+The nearest-neighbor advantage is important because all experiments use the same case30 topology. Dense scenario coverage allows retrieval from nearby training operating points.
+
+### 10.6 Early-stopping ablation
+
+A preliminary five-seed experiment used early stopping with patience 25.
+
+Compared with full 100-epoch training:
+
+| Metric | Early-stop mean | Full-100 mean |
+|---|---:|---:|
+| Pg MAE | 4.4591 MW | 4.4268 MW |
+| Qg MAE | 2.3370 MVAr | 2.3153 MVAr |
+| Branch P MAE | 2.0661 MW | 1.8489 MW |
+| Branch Q MAE | 0.8467 MVAr | 0.7661 MVAr |
+| KCL P MAE | 0.6888 MW | 0.6074 MW |
+| KCL Q MAE | 0.3686 MVAr | 0.3303 MVAr |
+| Cost MAPE | 4.9132% | 4.9088% |
+| Cost MAPE standard deviation | 0.5138% | 0.3500% |
+
+Full 100-epoch training particularly improved branch-flow and KCL metrics.
+
+Several runs reached their best checkpoint late:
+
+~~~text
+seed 42: epoch 89
+seed 44: epoch 97
+seed 45: epoch 88
+seed 46: epoch 94
+~~~
+
+Therefore, early-stopping patience 25 is too short for the final reported experiment.
+
+### 10.7 Reproducibility artifacts
+
+Training script:
+
+- `scripts/run_stage13_multiseed_full100.sh`
+
+Aggregation script:
+
+- `scripts/summarize_seed_group.py`
+
+Formal result report:
+
+- `reports/stage13_full100_holdout_killgen_loads_5seed.md`
+
+Preliminary early-stopping report:
+
+- `reports/stage13_preliminary_earlystop25_holdout_killgen_loads_5seed.md`
+<!-- STAGE13_END -->

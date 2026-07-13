@@ -22,6 +22,7 @@ MiniGridSFM30-V2 studies whether a heterogeneous graph neural network can approx
 
 - [Architecture](docs/architecture.md)
 - [Experiments](docs/experiments.md)
+- [Stage13 five-seed full-100 results](reports/stage13_full100_holdout_killgen_loads_5seed.md)
 - [Dataset manifest](data/MANIFEST.md)
 
 ---
