@@ -36,3 +36,4 @@ logs/
 .DS_Store
 Thumbs.db
 *.bak_*
+*.egg-info/

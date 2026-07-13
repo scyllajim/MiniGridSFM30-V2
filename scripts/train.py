@@ -5,73 +5,105 @@ import csv
 import random
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import Subset
 from torch_geometric.loader import DataLoader
 
 from minigridsfm30.dataset import Case30OPFDataset
-from minigridsfm30.model import GridSFM30, count_parameters
 from minigridsfm30.losses import compute_loss
-
-
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+from minigridsfm30.model import GridSFM30, count_parameters
+from minigridsfm30.training_utils import (
+    resolve_device,
+    save_json,
+    set_seed,
+    validate_batch_finite,
+    validate_metrics_finite,
+    validate_output_finite,
+)
 
 
 def split_dataset(ds, train_ratio: float, seed: int):
+    if not 0.0 < train_ratio < 1.0:
+        raise ValueError("--train-ratio must be strictly between 0 and 1.")
+
     n = len(ds)
-    idx = list(range(n))
+    if n < 2:
+        raise ValueError("At least two samples are required for train/val split.")
+
+    indices = list(range(n))
     rng = random.Random(seed)
-    rng.shuffle(idx)
+    rng.shuffle(indices)
 
     n_train = int(n * train_ratio)
-    train_idx = idx[:n_train]
-    val_idx = idx[n_train:]
+    n_train = min(max(n_train, 1), n - 1)
 
-    return Subset(ds, train_idx), Subset(ds, val_idx)
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train:]
 
-
-def move_to_device(batch, device):
-    return batch.to(device)
+    return Subset(ds, train_idx), Subset(ds, val_idx), train_idx, val_idx
 
 
-def run_epoch(model, loader, optimizer, device, train: bool, loss_kwargs: dict):
-    if train:
-        model.train()
-    else:
-        model.eval()
+def run_epoch(
+    model,
+    loader,
+    optimizer,
+    device,
+    train: bool,
+    loss_kwargs: dict,
+    check_finite: bool,
+):
+    model.train(train)
 
     total_loss = 0.0
     total_graphs = 0
     metric_sum = {}
 
-    for batch in loader:
-        batch = move_to_device(batch, device)
+    context = torch.enable_grad() if train else torch.no_grad()
 
-        if train:
-            optimizer.zero_grad(set_to_none=True)
+    with context:
+        for batch_index, batch in enumerate(loader):
+            if check_finite:
+                validate_batch_finite(batch)
 
-        with torch.set_grad_enabled(train):
-            out = model(batch)
-            loss, metrics = compute_loss(out, batch, **loss_kwargs)
+            batch = batch.to(device)
+
+            if train:
+                optimizer.zero_grad(set_to_none=True)
+
+            output = model(batch)
+
+            if check_finite:
+                validate_output_finite(output)
+
+            loss, metrics = compute_loss(output, batch, **loss_kwargs)
+
+            if check_finite:
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(
+                        f"Non-finite loss at batch {batch_index}: {loss}"
+                    )
+                validate_metrics_finite(metrics)
 
             if train:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
 
-        ng = int(batch.num_graphs)
-        total_loss += float(loss.detach().cpu()) * ng
-        total_graphs += ng
+            num_graphs = int(batch.num_graphs)
+            total_loss += float(loss.detach().cpu()) * num_graphs
+            total_graphs += num_graphs
 
-        for k, v in metrics.items():
-            metric_sum[k] = metric_sum.get(k, 0.0) + float(v) * ng
+            for key, value in metrics.items():
+                if torch.is_tensor(value):
+                    value = float(value.detach().cpu())
+                else:
+                    value = float(value)
+                metric_sum[key] = metric_sum.get(key, 0.0) + value * num_graphs
 
-    avg = {k: v / max(total_graphs, 1) for k, v in metric_sum.items()}
+    avg = {
+        key: value / max(total_graphs, 1)
+        for key, value in metric_sum.items()
+    }
     avg["loss"] = total_loss / max(total_graphs, 1)
     return avg
 
@@ -94,30 +126,28 @@ def print_metrics(prefix, epoch, metrics):
     ]
 
     parts = [f"{prefix} epoch={epoch:03d}"]
-    for k in keys:
-        if k in metrics:
-            parts.append(f"{k}={metrics[k]:.6f}")
+    for key in keys:
+        if key in metrics:
+            parts.append(f"{key}={metrics[key]:.6f}")
     print(" | ".join(parts))
 
 
-def save_metrics_csv(path, rows):
-    if len(rows) == 0:
+def save_metrics_csv(path: Path, rows):
+    if not rows:
         return
 
     keys = sorted(rows[0].keys())
-
-    with open(path, "w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
-        for r in rows:
-            writer.writerow(r)
+        writer.writerows(rows)
 
 
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--run-dir", type=str, default="runs/v2_baseline")
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--run-dir", default="runs/v2_baseline")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--hidden-dim", type=int, default=128)
@@ -129,10 +159,25 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-samples", type=int, default=None)
 
-    # ----------------------------
-    # Loss weights for Stage 8 physics-loss ablation
-    # These names match compute_loss() in minigridsfm30/losses.py
-    # ----------------------------
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto, cpu, cuda, or cuda:N",
+    )
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="0 disables early stopping.",
+    )
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument(
+        "--no-finite-check",
+        action="store_true",
+        help="Disable NaN/Inf checks for inputs, outputs, loss, and metrics.",
+    )
+
     parser.add_argument("--lambda-theta", type=float, default=1.0)
     parser.add_argument("--lambda-v", type=float, default=1.0)
     parser.add_argument("--lambda-pg", type=float, default=1.0)
@@ -148,31 +193,64 @@ def main():
 
     args = parser.parse_args()
 
+    if args.epochs <= 0:
+        raise ValueError("--epochs must be positive.")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive.")
+    if args.num_workers < 0:
+        raise ValueError("--num-workers cannot be negative.")
+    if args.early_stopping_patience < 0:
+        raise ValueError("--early-stopping-patience cannot be negative.")
+
     set_seed(args.seed)
 
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    device = resolve_device(args.device)
+    check_finite = not args.no_finite_check
 
-    ds = Case30OPFDataset(
+    dataset = Case30OPFDataset(
         args.data,
         only_feasible=True,
         max_samples=args.max_samples,
     )
 
-    train_ds, val_ds = split_dataset(ds, args.train_ratio, args.seed)
+    train_ds, val_ds, train_idx, val_idx = split_dataset(
+        dataset,
+        args.train_ratio,
+        args.seed,
+    )
+
+    split_payload = {
+        "data": args.data,
+        "dataset_size": len(dataset),
+        "train_ratio": args.train_ratio,
+        "seed": args.seed,
+        "train_indices": train_idx,
+        "val_indices": val_idx,
+    }
+    save_json(run_dir / "split_indices.json", split_payload)
+    save_json(run_dir / "args.json", vars(args))
+
+    pin_memory = device.type == "cuda"
 
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,
         shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=args.num_workers > 0,
     )
 
     val_loader = DataLoader(
         val_ds,
         batch_size=args.batch_size,
         shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=args.num_workers > 0,
     )
 
     model = GridSFM30(
@@ -205,10 +283,13 @@ def main():
     print("=== MiniGridSFM30-v2 Training ===")
     print("device:", device)
     print("data:", args.data)
-    print("dataset size:", len(ds))
+    print("dataset size:", len(dataset))
     print("train size:", len(train_ds))
     print("val size:", len(val_ds))
     print("batch size:", args.batch_size)
+    print("num workers:", args.num_workers)
+    print("finite checks:", check_finite)
+    print("early stopping patience:", args.early_stopping_patience)
     print("hidden_dim:", args.hidden_dim)
     print("num_layers:", args.num_layers)
     print("parameters:", count_parameters(model))
@@ -217,58 +298,85 @@ def main():
     print()
 
     best_val = float("inf")
+    best_epoch = -1
+    epochs_without_improvement = 0
     rows = []
 
     for epoch in range(1, args.epochs + 1):
-        train_m = run_epoch(
+        train_metrics = run_epoch(
             model,
             train_loader,
             optimizer,
             device,
             train=True,
             loss_kwargs=loss_kwargs,
+            check_finite=check_finite,
         )
 
-        val_m = run_epoch(
+        val_metrics = run_epoch(
             model,
             val_loader,
             optimizer,
             device,
             train=False,
             loss_kwargs=loss_kwargs,
+            check_finite=check_finite,
         )
 
-        print_metrics("train", epoch, train_m)
-        print_metrics("val  ", epoch, val_m)
+        print_metrics("train", epoch, train_metrics)
+        print_metrics("val  ", epoch, val_metrics)
         print()
 
         row = {"epoch": epoch}
-        for k, v in train_m.items():
-            row[f"train_{k}"] = v
-        for k, v in val_m.items():
-            row[f"val_{k}"] = v
+        row.update({f"train_{k}": v for k, v in train_metrics.items()})
+        row.update({f"val_{k}": v for k, v in val_metrics.items()})
         rows.append(row)
 
-        val_loss = val_m.get("loss_total", val_m.get("loss", float("inf")))
+        val_loss = val_metrics.get(
+            "loss_total",
+            val_metrics.get("loss", float("inf")),
+        )
 
-        if val_loss < best_val:
+        improved = val_loss < (
+            best_val - args.early_stopping_min_delta
+        )
+
+        if improved:
             best_val = val_loss
-            ckpt = {
+            best_epoch = epoch
+            epochs_without_improvement = 0
+
+            checkpoint = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "args": vars(args),
                 "loss_kwargs": loss_kwargs,
                 "best_val": best_val,
+                "split_indices_file": str(run_dir / "split_indices.json"),
             }
-            torch.save(ckpt, run_dir / "best_model.pt")
+            torch.save(checkpoint, run_dir / "best_model.pt")
+        else:
+            epochs_without_improvement += 1
 
         save_metrics_csv(run_dir / "metrics.csv", rows)
 
+        if (
+            args.early_stopping_patience > 0
+            and epochs_without_improvement >= args.early_stopping_patience
+        ):
+            print(
+                "Early stopping triggered: "
+                f"no improvement for {epochs_without_improvement} epoch(s)."
+            )
+            break
+
     print("=== Training finished ===")
+    print("best_epoch:", best_epoch)
     print("best_val:", best_val)
     print("best_model:", run_dir / "best_model.pt")
     print("metrics:", run_dir / "metrics.csv")
+    print("split_indices:", run_dir / "split_indices.json")
 
 
 if __name__ == "__main__":
