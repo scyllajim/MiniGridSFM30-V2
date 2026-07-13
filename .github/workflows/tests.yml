@@ -31,16 +31,16 @@ jobs:
           pip install torch torchvision torchaudio \
             --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install project dependencies
+      - name: Install project and dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -e ".[dev]"
 
       - name: Import check
         run: |
           python -c "import torch; import torch_geometric; import pandapower"
-          python -c "from minigridsfm30.model import GridSFM30"
+          python -c "import minigridsfm30; from minigridsfm30.model import GridSFM30"
+          python -c "from minigridsfm30.model import GridSFM30, count_parameters; print(count_parameters(GridSFM30()))"
 
       - name: Run tests
         run: |
-          pytest -q
+          pytest -vv --tb=long
