@@ -116,7 +116,7 @@ def save_metrics_csv(path, rows):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data", type=str, default="data/raw/case30_1000_v2.pkl")
+    parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--run-dir", type=str, default="runs/v2_baseline")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=16)
