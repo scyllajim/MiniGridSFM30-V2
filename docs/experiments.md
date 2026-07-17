@@ -383,3 +383,104 @@ Reproduction tools:
 - `scripts/make_unseen_generator_split.py`
 - `scripts/run_stage13_unseen_generator_5seed.sh`
 <!-- STAGE13_UNSEEN_GENERATOR_END -->
+
+<!-- STAGE13_UNSEEN_LOAD_START -->
+## 12. Stage13.2 unseen high-load range holdout
+
+This experiment evaluates extrapolation from lower-load operating points to a disjoint high-load validation range.
+
+### 12.1 Split definition
+
+- source graphs: `5806`;
+- training graphs: `4898`;
+- excluded gap graphs: `37`;
+- validation graphs: `871`;
+- training quantile cutoff: `0.70`;
+- validation quantile cutoff: `0.85`;
+- maximum training load: `189.2000 MW`;
+- minimum validation load: `189.3581 MW`;
+- separation gap: `0.1581 MW`;
+- leakage check: passed;
+- seeds: 42, 43, 44, 45, 46;
+- training length: 100 epochs;
+- early stopping: disabled.
+
+The training split contains operating points at or below the lower-load cutoff. Validation contains only operating points at or above the high-load cutoff. Samples in the intermediate range are excluded.
+
+### 12.2 Five-seed aggregate results
+
+| Metric | Mean ± Std | Min | Max |
+|---|---:|---:|---:|
+| Theta MAE | 0.0161 ± 0.0017 | 0.0146 | 0.0187 |
+| V MAE | 0.0069 ± 0.0006 p.u. | 0.0066 | 0.0079 |
+| Validation loss | 0.0075 ± 0.0001 | 0.0074 | 0.0077 |
+| Pg MAE | 4.5614 ± 0.0905 MW | 4.4094 | 4.6426 |
+| Qg MAE | 2.7130 ± 0.1161 MVAr | 2.6102 | 2.9020 |
+| Branch P MAE | 1.7551 ± 0.0651 MW | 1.6870 | 1.8540 |
+| Branch Q MAE | 0.8534 ± 0.0196 MVAr | 0.8249 | 0.8741 |
+| KCL P MAE | 0.5202 ± 0.0735 MW | 0.4415 | 0.6028 |
+| KCL Q MAE | 0.3204 ± 0.0640 MVAr | 0.2549 | 0.4064 |
+| Balance P MAE | 2.2812 ± 0.9940 MW | 1.3611 | 3.9012 |
+| Balance Q MAE | 0.9845 ± 0.3006 MVAr | 0.6010 | 1.2429 |
+| Cost MAPE | 7.7132 ± 0.2475% | 7.3589 | 7.9998 |
+
+### 12.3 Comparison with the combination holdout
+
+| Metric | Combination holdout | Unseen high-load | Relative change |
+|---|---:|---:|---:|
+| Pg MAE | 4.4268 MW | 4.5614 MW | +3.04% |
+| Qg MAE | 2.3153 MVAr | 2.7130 MVAr | +17.18% |
+| Branch P MAE | 1.8489 MW | 1.7551 MW | -5.07% |
+| Branch Q MAE | 0.7661 MVAr | 0.8534 MVAr | +11.40% |
+| KCL P MAE | 0.6074 MW | 0.5202 MW | -14.36% |
+| KCL Q MAE | 0.3303 MVAr | 0.3204 MVAr | -3.00% |
+| Balance P MAE | 2.8444 MW | 2.2812 MW | -19.80% |
+| Balance Q MAE | 2.0175 MVAr | 0.9845 MVAr | -51.20% |
+| Cost MAPE | 4.9088% | 7.7132% | +57.13% |
+
+### 12.4 Interpretation
+
+The unseen high-load split is considerably easier than the unseen-generator split.
+
+The results indicate:
+
+1. generator active-power prediction changes only slightly under the high-load holdout;
+2. reactive-power prediction degrades more noticeably;
+3. branch-flow and KCL errors remain stable;
+4. global power-balance errors do not deteriorate and are lower than in the earlier combination holdout;
+5. cost prediction degrades substantially, increasing from 4.9088% to 7.7132% MAPE;
+6. random-seed variability remains relatively low for most local prediction metrics.
+
+This suggests that the model can extrapolate many electrical state and flow quantities over the tested load range, while generation-cost estimation is more sensitive to high-load distribution shift.
+
+### 12.5 Important limitation
+
+The numerical separation between the maximum training load and minimum validation load is only `0.1581 MW`.
+
+Although the quantile partitions are disjoint and the leakage check passes, the absolute load gap is small because many samples share similar aggregate load levels. Therefore, this experiment should be described as a quantile-based high-load holdout rather than strong long-range extrapolation.
+
+A stronger follow-up should generate a dedicated validation set with load scaling beyond the maximum scaling used for training.
+
+### 12.6 Reproducibility artifacts
+
+Detailed report:
+
+- `reports/stage13_unseen_load_5seed.md`
+
+Aggregate CSV:
+
+- `reports/stage13_unseen_load_5seed.csv`
+
+Per-seed CSV:
+
+- `reports/stage13_unseen_load_5seed_per_seed.csv`
+
+Split manifest:
+
+- `reports/stage13_unseen_load_manifest.json`
+
+Reproduction tools:
+
+- `scripts/make_unseen_load_split.py`
+- `scripts/run_stage13_unseen_load_5seed.sh`
+<!-- STAGE13_UNSEEN_LOAD_END -->
