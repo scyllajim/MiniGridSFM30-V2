@@ -289,3 +289,97 @@ Preliminary early-stopping report:
 
 - `reports/stage13_preliminary_earlystop25_holdout_killgen_loads_5seed.md`
 <!-- STAGE13_END -->
+
+<!-- STAGE13_UNSEEN_GENERATOR_START -->
+## 11. Stage13.1 unseen-generator holdout
+
+This experiment evaluates zero-shot generalization to a generator outage that is completely absent from the training set.
+
+### 11.1 Split definition
+
+- held-out generator node index: `0`;
+- source graphs: `5806`;
+- training graphs: `3920`;
+- validation graphs: `1886`;
+- training condition: the held-out generator is always online;
+- validation condition: the held-out generator is always offline;
+- leakage check: passed;
+- seeds: 42, 43, 44, 45, 46;
+- training length: 100 epochs;
+- early stopping: disabled.
+
+Regular generator nodes are placed before the ext-grid node in the graph representation, so held-out generator index `0` refers to a regular generator rather than the slack/ext-grid node.
+
+### 11.2 Five-seed results
+
+| Metric | Mean ± Std | Min | Max |
+|---|---:|---:|---:|
+| Theta MAE | 0.0338 ± 0.0048 | 0.0280 | 0.0402 |
+| V MAE | 0.0140 ± 0.0059 p.u. | 0.0090 | 0.0232 |
+| Validation loss | 0.0497 ± 0.0031 | 0.0445 | 0.0526 |
+| Pg MAE | 10.5641 ± 0.8961 MW | 9.4911 | 11.4040 |
+| Qg MAE | 8.6426 ± 0.6264 MVAr | 7.7371 | 9.3880 |
+| Branch P MAE | 4.4950 ± 0.3377 MW | 4.2404 | 4.9725 |
+| Branch Q MAE | 2.4207 ± 0.6909 MVAr | 2.0101 | 3.6245 |
+| KCL P MAE | 2.1394 ± 0.7939 MW | 1.4957 | 3.0205 |
+| KCL Q MAE | 1.7306 ± 0.6338 MVAr | 1.0435 | 2.4314 |
+| Balance P MAE | 16.2955 ± 7.9580 MW | 5.5718 | 24.6558 |
+| Balance Q MAE | 9.2943 ± 4.1040 MVAr | 4.8126 | 13.5694 |
+| Cost MAPE | 21.4438 ± 1.6324% | 20.0712 | 23.4444 |
+
+### 11.3 Comparison with the combination holdout
+
+| Metric | Combination holdout | Unseen-generator holdout | Error multiplier |
+|---|---:|---:|---:|
+| Pg MAE | 4.4268 MW | 10.5641 MW | 2.39× |
+| Qg MAE | 2.3153 MVAr | 8.6426 MVAr | 3.73× |
+| Branch P MAE | 1.8489 MW | 4.4950 MW | 2.43× |
+| Branch Q MAE | 0.7661 MVAr | 2.4207 MVAr | 3.16× |
+| KCL P MAE | 0.6074 MW | 2.1394 MW | 3.52× |
+| KCL Q MAE | 0.3303 MVAr | 1.7306 MVAr | 5.24× |
+| Balance P MAE | 2.8444 MW | 16.2955 MW | 5.73× |
+| Balance Q MAE | 2.0175 MVAr | 9.2943 MVAr | 4.61× |
+| Cost MAPE | 4.9088% | 21.4438% | 4.37× |
+
+### 11.4 Interpretation
+
+The unseen-generator split is substantially harder than the earlier combination holdout.
+
+The results indicate:
+
+1. outage-aware features allow the network to represent a generator as online or offline;
+2. the model performs reasonably when outage patterns are represented in the training distribution;
+3. the model does not strongly generalize to a generator whose offline state is never observed during training;
+4. dispatch, reactive-power prediction, system balance, and generation cost degrade sharply;
+5. the very large balance-error standard deviations show strong sensitivity to random initialization under this out-of-distribution condition.
+
+Therefore, outage-aware encoding is necessary but not sufficient for zero-shot generator-outage generalization.
+
+The correct conclusion is not that the model has learned arbitrary outage compositionality. Instead, it has learned partial interpolation across outage combinations represented in training.
+
+### 11.5 Recommended follow-up
+
+Potential improvements include:
+
+- balanced outage sampling across all regular generators;
+- leave-one-generator-out training curricula;
+- generator identity or electrical-position embeddings;
+- bus-generator structural positional encodings;
+- auxiliary prediction of total available generation;
+- physics projection after neural inference;
+- contingency-aware pretraining;
+- training across multiple grid topologies.
+
+Detailed report:
+
+- `reports/stage13_unseen_generator_5seed.md`
+
+Split manifest:
+
+- `reports/stage13_unseen_generator_manifest.json`
+
+Reproduction tools:
+
+- `scripts/make_unseen_generator_split.py`
+- `scripts/run_stage13_unseen_generator_5seed.sh`
+<!-- STAGE13_UNSEEN_GENERATOR_END -->
