@@ -433,9 +433,16 @@ def net_to_heterodata(net, require_solution: bool = True) -> HeteroData:
     branch_to_bus_dst = []
     branch_to_bus_attr = []
 
-    for br_pos, (line_idx, row) in enumerate(net.line.iterrows()):
+    for line_idx, row in net.line.iterrows():
         if not _safe_bool(row.get("in_service", True), True):
             continue
+
+        # Use a compact branch index after filtering offline lines.
+        #
+        # The original pandapower line index may contain gaps, and skipping
+        # an offline line must not leave gaps in branch_ac node positions.
+        # Endpoint edges must always reference [0, num_branch_ac).
+        br_pos = len(branch_x)
 
         fb = int(row["from_bus"])
         tb = int(row["to_bus"])
