@@ -484,3 +484,140 @@ Reproduction tools:
 - `scripts/make_unseen_load_split.py`
 - `scripts/run_stage13_unseen_load_5seed.sh`
 <!-- STAGE13_UNSEEN_LOAD_END -->
+
+<!-- STAGE13_TOPOLOGY_START -->
+## 13. Stage13.3 topology-changing held-out line experiment
+
+This experiment evaluates whether the heterogeneous GraphSAGE model can generalize to a single-line outage topology that is completely absent from training.
+
+### 13.1 Split construction
+
+- case: IEEE 30-bus system;
+- held-out line position: `40`;
+- held-out pandapower line index: `40`;
+- held-out connection: bus `5 -> 27`;
+- training graphs: `2638`;
+- validation graphs: `80`;
+- intact-topology training graphs: `699`;
+- held-out outage validation graphs: `80`;
+- training topologies: intact topology and successful single-line outages other than line 40;
+- validation topology: line 40 outage only;
+- leakage check: passed;
+- seeds: 42, 43, 44, 45, 46;
+- training length: 100 epochs;
+- early stopping: disabled.
+
+Each outage operating point was independently solved using AC optimal power flow. The line outage changes the branch-node set, endpoint relations, cycle basis, optimal generator dispatch, voltage solution, and branch-flow targets.
+
+### 13.2 Five-seed aggregate results
+
+| Metric | Mean ± Std | Min | Max |
+|---|---:|---:|---:|
+| Theta MAE | 0.0083 ± 0.0043 | 0.0058 | 0.0159 |
+| V MAE | 0.0056 ± 0.0012 p.u. | 0.0044 | 0.0074 |
+| Validation loss | 0.0078 ± 0.0018 | 0.0061 | 0.0098 |
+| Pg MAE | 3.2478 ± 0.1521 MW | 3.0748 | 3.4249 |
+| Qg MAE | 3.3172 ± 0.0868 MVAr | 3.2087 | 3.4313 |
+| Branch P MAE | 1.4060 ± 0.1802 MW | 1.2340 | 1.6953 |
+| Branch Q MAE | 1.3759 ± 0.1557 MVAr | 1.1915 | 1.5474 |
+| KCL P MAE | 1.3008 ± 0.4013 MW | 0.9589 | 1.7475 |
+| KCL Q MAE | 1.3747 ± 0.3577 MVAr | 0.9938 | 1.8404 |
+| Balance P MAE | 3.0652 ± 1.5245 MW | 1.5326 | 5.6028 |
+| Balance Q MAE | 2.8411 ± 1.4299 MVAr | 1.4619 | 5.2456 |
+| Cost MAPE | 5.6195 ± 0.7062% | 4.7710 | 6.3397 |
+
+### 13.3 Per-seed behavior
+
+| Seed | Best epoch | Validation loss | Pg MAE | Branch P MAE | KCL P MAE | Cost MAPE |
+|---:|---:|---:|---:|---:|---:|---:|
+| 42 | 76 | 0.0070 | 3.2905 MW | 1.3661 MW | 0.9589 MW | 4.7710% |
+| 43 | 72 | 0.0063 | 3.1053 MW | 1.2340 MW | 1.0374 MW | 4.9586% |
+| 44 | 44 | 0.0097 | 3.4249 MW | 1.4449 MW | 1.7475 MW | 6.0768% |
+| 45 | 25 | 0.0098 | 3.0748 MW | 1.6953 MW | 1.7307 MW | 5.9513% |
+| 46 | 34 | 0.0061 | 3.3435 MW | 1.2899 MW | 1.0296 MW | 6.3397% |
+
+All five runs completed the full 100 epochs. The reported metrics use the checkpoint with the lowest validation loss.
+
+### 13.4 Comparison with previous holdouts
+
+| Metric | Combination holdout | High-load holdout | Topology holdout |
+|---|---:|---:|---:|
+| Pg MAE | 4.4268 MW | 4.5614 MW | 3.2478 MW |
+| Qg MAE | 2.3153 MVAr | 2.7130 MVAr | 3.3172 MVAr |
+| Branch P MAE | 1.8489 MW | 1.7551 MW | 1.4060 MW |
+| Branch Q MAE | 0.7661 MVAr | 0.8534 MVAr | 1.3759 MVAr |
+| KCL P MAE | 0.6074 MW | 0.5202 MW | 1.3008 MW |
+| KCL Q MAE | 0.3303 MVAr | 0.3204 MVAr | 1.3747 MVAr |
+| Balance P MAE | 2.8444 MW | 2.2812 MW | 3.0652 MW |
+| Balance Q MAE | 2.0175 MVAr | 0.9845 MVAr | 2.8411 MVAr |
+| Cost MAPE | 4.9088% | 7.7132% | 5.6195% |
+
+The topology holdout has lower active-power and branch-active-flow errors than the earlier combination and high-load holdouts. However, reactive-power, KCL, and global balance errors are substantially higher.
+
+### 13.5 Interpretation
+
+The model successfully processes and predicts a graph topology that is absent from training. This supports the inductive capability of the heterogeneous GraphSAGE architecture.
+
+The results show three different behaviors:
+
+1. **Voltage and active-flow prediction remain effective.**
+   Voltage magnitude, generator active power, and branch active power retain relatively low errors.
+
+2. **Reactive-power prediction is more topology-sensitive.**
+   Generator reactive power and branch reactive flow deteriorate more strongly under the unseen outage.
+
+3. **Physical consistency is less stable than supervised prediction.**
+   KCL and global balance errors increase, even when direct node and branch prediction errors remain moderate.
+
+This indicates that accurate supervised predictions do not automatically guarantee strict physical consistency after a topology shift.
+
+### 13.6 Seed sensitivity
+
+The standard deviations of local supervised metrics are moderate, but KCL and balance metrics vary strongly across seeds.
+
+For example, Balance P MAE ranges from `1.5326 MW` to `5.6028 MW`. The best checkpoint epoch ranges from 25 to 76.
+
+This suggests that the topology-generalization solution has multiple optimization regimes. Model selection based only on validation loss may not consistently select the checkpoint with the best physical residuals.
+
+### 13.7 Limitations
+
+This experiment has several important limitations:
+
+- validation contains only 80 graphs;
+- only one line outage is held out;
+- the held-out line was selected from outage candidates with high successful-sample availability;
+- different line outages can have very different electrical difficulty;
+- the current objective does not directly enforce KCL or global power balance because `lambda_feas=0`;
+- validation loss is not identical to the final physical-consistency metrics.
+
+Therefore, the result demonstrates single-topology inductive generalization, but does not establish uniform N−1 contingency generalization.
+
+A stronger evaluation should repeat the holdout across several electrically diverse lines and report macro-averaged results.
+
+### 13.8 Reproducibility artifacts
+
+Detailed report:
+
+- `reports/stage13_topology_5seed.md`
+
+Aggregate results:
+
+- `reports/stage13_topology_5seed.csv`
+
+Per-seed results:
+
+- `reports/stage13_topology_5seed_per_seed.csv`
+
+Split manifest:
+
+- `reports/stage13_topology_manifest.json`
+
+Generation and validation tools:
+
+- `scripts/generate_topology_outage_dataset.py`
+- `scripts/check_topology_dataset.py`
+
+Training launcher:
+
+- `scripts/run_stage13_topology_5seed.sh`
+<!-- STAGE13_TOPOLOGY_END -->
